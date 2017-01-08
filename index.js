@@ -75,9 +75,49 @@ function conventionalCommitsParser(options) {
   return through.obj(function(data, enc, cb) {
     var commit;
 
+    var dataString = data.toString();
+    var parts = dataString.split("-hash-");
+    var body = parts[0], footer = '\n-hash-' + parts[1];
+
+    function splitOnPattern(pattern, string) {
+      var match, indexes = [];
+      while ((match = pattern.exec(string)) !== null) {
+        indexes.push(match.index);
+      }
+      indexes.push(string.length);
+
+      let prevIdx = 0;
+      return indexes.reduce(function(acc, index) {
+        if (prevIdx - index === 0) return acc;
+        acc.push(string.substr(prevIdx, (index - prevIdx)));
+        prevIdx = index;
+        return acc;
+      }, [])
+    }
+
+    var headerPattern = new RegExp(options.headerPattern.source, "gm");
+    var changes = splitOnPattern(headerPattern, body);
+
+    changes = changes.map(function(change) {
+      return splitOnPattern(/BREAKING CHANGE/gm, change);
+    }).reduce(function(acc, arr) { return acc.concat(arr); });
+
+    changes = changes.map(function(changeStr) {
+      if (!changeStr.match(headerPattern)) {
+        return changeStr.replace(/(\s*BREAKING CHANGES?\s*:\s*)(.*)/g, "feat(*): $2\n$1$2");
+      }
+      return changeStr;
+    });
+
+    changes = changes.map(function(str) { return str + footer });
+
+    var _this = this;
+
     try {
-      commit = parser(data.toString(), options, reg);
-      cb(null, commit);
+      changes.forEach(function(change) {
+        commit = parser(change, options, reg);
+        _this.push(commit);
+      });
     } catch (err) {
       if (options.warn === true) {
         cb(err);
@@ -86,6 +126,8 @@ function conventionalCommitsParser(options) {
         cb(null, '');
       }
     }
+
+    cb();
   });
 }
 
@@ -98,3 +140,4 @@ function sync(commit, options) {
 
 module.exports = conventionalCommitsParser;
 module.exports.sync = sync;
+
